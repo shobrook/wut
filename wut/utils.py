@@ -1,21 +1,24 @@
 # Standard library
 import os
 import tempfile
+import httpx
+import sys
 from collections import namedtuple
 from subprocess import check_output, run, CalledProcessError, DEVNULL
 from typing import List, Optional, Tuple
 
 # Third party
-from ollama import chat
+from ollama import Client, ResponseError, list as list_models
 from psutil import Process
 from openai import OpenAI
 from anthropic import Anthropic
 from rich.markdown import Markdown
 
 # Local
-from wut.prompts import EXPLAIN_PROMPT, ANSWER_PROMPT
-
-# from prompts import EXPLAIN_PROMPT, ANSWER_PROMPT
+try:
+    from wut.prompts import EXPLAIN_PROMPT, ANSWER_PROMPT, FIX_PROMPT
+except ImportError:
+    from prompts import EXPLAIN_PROMPT, ANSWER_PROMPT, FIX_PROMPT # type: ignore
 
 MAX_CHARS = 10000
 MAX_COMMANDS = 3
@@ -54,8 +57,8 @@ def get_shell_name(shell_path: Optional[str] = None) -> Optional[str]:
     return None
 
 
-def get_shell_name_and_path() -> Tuple[Optional[str], Optional[str]]:
-    path = os.environ.get("SHELL", None) or os.environ.get("TF_SHELL", None)
+def get_shell_name_and_path() -> Tuple[str, str]:
+    path = os.environ.get("SHELL", "") or os.environ.get("TF_SHELL", "")
     if shell_name := get_shell_name(path):
         return shell_name, path
 
@@ -74,7 +77,7 @@ def get_shell_name_and_path() -> Tuple[Optional[str], Optional[str]]:
         except TypeError:
             proc = proc.parent
 
-    return None, path
+    return "", path
 
 
 def get_shell_prompt(shell_name: str, shell_path: str) -> Optional[str]:
@@ -153,14 +156,15 @@ def get_commands(pane_output: str, shell: Shell) -> List[Command]:
     # only the latest prompt will be used to split the pane output into `Command` objects.
 
     commands = []  # Order: newest to oldest
-    buffer = []
+    buffer: list[str] = []
     for line in reversed(pane_output.splitlines()):
         if not line.strip():
             continue
 
         if shell.prompt.lower() in line.lower():
             command_text = line.split(shell.prompt, 1)[1].strip()
-            command = Command(command_text, "\n".join(reversed(buffer)).strip())
+            command = Command(command_text, "\n".join(
+                reversed(buffer)).strip())
             commands.append(command)
             buffer = []
             continue
@@ -179,17 +183,17 @@ def truncate_commands(commands: List[Command]) -> List[Command]:
             break
         num_chars += command_chars
 
-        output = []
+        output_lines = []
         for line in reversed(command.output.splitlines()):
             line_chars = count_chars(line)
             if line_chars + num_chars > MAX_CHARS:
                 break
 
-            output.append(line)
+            output_lines.append(line)
             num_chars += line_chars
 
-        output = "\n".join(reversed(output))
-        command = Command(command.text, output)
+        output_text = "\n".join(reversed(output_lines))
+        command = Command(command.text, output_text)
         truncated_commands.append(command)
 
     return truncated_commands
@@ -220,7 +224,7 @@ def command_to_string(command: Command, shell_prompt: Optional[str] = None) -> s
     return command_str
 
 
-def format_output(output: str) -> str:
+def format_output(output: str) -> Markdown:
     return Markdown(
         output,
         code_theme="monokai",
@@ -237,7 +241,7 @@ def run_anthropic(system_message: str, user_message: str) -> str:
         system=system_message,
         messages=[{"role": "user", "content": user_message}],
     )
-    return response.content[0].text
+    return response.content[0].text or ""
 
 
 def run_openai(system_message: str, user_message: str) -> str:
@@ -247,21 +251,41 @@ def run_openai(system_message: str, user_message: str) -> str:
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_message},
         ],
-        model=os.getenv("OPENAI_MODEL", None) or "gpt-4o",
+        model=os.getenv("OPENAI_MODEL", "") or "gpt-4o",
         temperature=0.7,
     )
-    return response.choices[0].message.content
+    return response.choices[0].message.content or ""
 
 
 def run_ollama(system_message: str, user_message: str) -> str:
-    response = chat(
-        model=os.getenv("OLLAMA_MODEL", None),
-        messages=[
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": user_message},
-        ],
+    model = os.getenv("OLLAMA_MODEL", "")
+    host = os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434")
+    if not host.endswith(":11434"):
+        host = f"{host}:11434"
+    if not host.startswith("http://"):
+        host = f"http://{host}"
+    client = Client(
+        host=host,
     )
-    return response.message.content
+    try:
+        response = client.chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message},
+            ],)
+    except httpx.ConnectError as e:
+        return f"Failed to connect to Ollama host: {host}. Please check the host and try again."
+    except ResponseError as e:
+        if e.status_code == 404:
+            models = list_models()
+            available_models = [m['name'] for m in models.get('models', [])]
+            models_list = ', '.join(available_models) if available_models else 'no models found'
+            return f"Model {model} not found on Ollama host: {host}. Please check the model name and try again.\nAvailable models: {models_list}"
+    except Exception as e:
+        return f"An error occurred: {e}"
+    
+    return response['message']['content']
 
 
 def get_llm_provider() -> str:
@@ -326,9 +350,25 @@ def build_query(context: str, query: Optional[str] = None) -> str:
     return f"{context}\n\n{query}"
 
 
-def explain(context: str, query: Optional[str] = None) -> str:
-    system_message = EXPLAIN_PROMPT if not query else ANSWER_PROMPT
-    user_message = build_query(context, query)
+def get_os_info() -> str:
+    """Get OS type and distribution information."""
+    if sys.platform.startswith('win'):
+        return "Windows"
+    elif sys.platform == 'darwin':
+        return "macOS"
+    elif sys.platform.startswith('linux'):
+        if os.path.exists('/etc/os-release'):
+            with open('/etc/os-release', 'r') as f:
+                for line in f:
+                    if line.startswith('PRETTY_NAME='):
+                        return line.split('=')[1].strip().strip('"')
+        return "Linux"
+    return "Unknown OS"
+
+def explain(context: str, query: Optional[str] = None) -> Markdown:
+    system_message = EXPLAIN_PROMPT
+    os_info = get_os_info()
+    user_message = f"OS: {os_info}\n\n{build_query(context, query)}"
     provider = get_llm_provider()
 
     call_llm = run_openai
@@ -339,3 +379,25 @@ def explain(context: str, query: Optional[str] = None) -> str:
 
     output = call_llm(system_message, user_message)
     return format_output(output)
+
+def fix(context: str) -> Tuple[str, Markdown]:
+    system_message = FIX_PROMPT
+    os_info = get_os_info()
+    user_message = f"OS: {os_info}\n\n{build_query(context)}"
+    provider = get_llm_provider()
+
+    call_llm = run_openai
+    if provider == "anthropic":
+        call_llm = run_anthropic
+    elif provider == "ollama":
+        call_llm = run_ollama
+
+    output = call_llm(system_message, user_message)
+    
+    import re
+    if match := re.search(r'```[^\n]*\n(.+?)```', output, re.DOTALL):
+        command = match.group(1).strip()
+    else:
+        command = ""
+
+    return command, format_output(output)
