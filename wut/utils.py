@@ -274,6 +274,22 @@ def get_llm_provider() -> str:
     if os.getenv("OLLAMA_MODEL", None):
         return "ollama"
 
+    xdg_config_home = os.getenv("XDG_CONFIG_HOME", expanduser("~/.config"))
+    config_paths = [
+        join(xdg_config_home, "llm-manager", "llm.conf"),
+        "/etc/llm.conf"
+    ]
+    for config_file in config_paths:
+        if exists(config_file):
+            with open(config_file, "r") as f:
+                lines = f.readlines()
+            for line in lines:
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    if key.strip() == "code":
+                        os.environ["OLLAMA_MODEL"] = value.strip()
+                        return "ollama"
+
     raise ValueError("No API key found for OpenAI or Anthropic.")
 
 
