@@ -11,7 +11,7 @@ if sys.version_info[:3] < (3, 0, 0):
 
 setup(
     name="wut-cli",
-    version="1.0.8",
+    version="1.0.9",
     description="CLI that explains the output of your last command",
     url="https://github.com/shobrook/wut",
     author="shobrook",
@@ -29,8 +29,8 @@ setup(
     include_package_data=True,
     packages=find_packages(),
     entry_points={"console_scripts": ["wut = wut.wut:main"]},
-    install_requires=["openai", "anthropic", "ollama", "rich", "psutil"],
-    requires=["openai", "anthropic", "ollama", "rich", "psutil"],
+    install_requires=["openai", "anthropic", "ollama", "mistralai", "rich", "psutil"],
+    requires=["openai", "anthropic", "ollama", "mistralai", "rich", "psutil"],
     python_requires=">=3",
     license="MIT",
 )

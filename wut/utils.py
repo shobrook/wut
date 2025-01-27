@@ -10,6 +10,7 @@ from ollama import chat
 from psutil import Process
 from openai import OpenAI
 from anthropic import Anthropic
+from mistralai import Mistral
 from rich.markdown import Markdown
 
 # Local
@@ -228,6 +229,22 @@ def format_output(output: str) -> str:
         inline_code_theme="monokai",
     )
 
+def run_mistral(system_message: str, user_message: str) -> str:
+    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
+    response = client.chat.complete(
+        model= "mistral-large-latest",
+        messages = [
+            {
+                "role": "system",
+                "content": system_message,
+            },
+            {
+                "role": "user",
+                "content": user_message
+            }
+        ]
+    )
+    return response.choices[0].message.content
 
 def run_anthropic(system_message: str, user_message: str) -> str:
     anthropic = Anthropic()
@@ -270,6 +287,9 @@ def get_llm_provider() -> str:
 
     if os.getenv("ANTHROPIC_API_KEY", None):
         return "anthropic"
+
+    if os.getenv("MISTRAL_API_KEY", None):
+        return "mistral"
 
     if os.getenv("OLLAMA_MODEL", None):
         return "ollama"
@@ -334,6 +354,8 @@ def explain(context: str, query: Optional[str] = None) -> str:
     call_llm = run_openai
     if provider == "anthropic":
         call_llm = run_anthropic
+    elif provider == "mistral":
+        call_llm = run_mistral
     elif provider == "ollama":
         call_llm = run_ollama
 

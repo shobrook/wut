@@ -10,6 +10,7 @@ openai = "*"
 rich = "*"
 anthropic = "*"
 ollama = "*"
+mistralai = "*"
 
 [dev-packages]
 
