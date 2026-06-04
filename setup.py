@@ -31,6 +31,9 @@ setup(
     entry_points={"console_scripts": ["wut = wut.wut:main"]},
     install_requires=["openai", "anthropic", "ollama", "rich", "psutil"],
     requires=["openai", "anthropic", "ollama", "rich", "psutil"],
+    extras_require={
+        "litellm": ["litellm>=1.80.0,<1.87.0"],
+    },
     python_requires=">=3",
     license="MIT",
 )

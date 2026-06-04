@@ -264,7 +264,24 @@ def run_ollama(system_message: str, user_message: str) -> str:
     return response.message.content
 
 
+def run_litellm(system_message: str, user_message: str) -> str:
+    import litellm
+
+    response = litellm.completion(
+        model=os.getenv("LITELLM_MODEL", "gpt-4o"),
+        messages=[
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message},
+        ],
+        drop_params=True,
+    )
+    return response.choices[0].message.content
+
+
 def get_llm_provider() -> str:
+    if os.getenv("LITELLM_MODEL", None):
+        return "litellm"
+
     if os.getenv("OPENAI_API_KEY", None):  # Default
         return "openai"
 
@@ -336,6 +353,8 @@ def explain(context: str, query: Optional[str] = None) -> str:
         call_llm = run_anthropic
     elif provider == "ollama":
         call_llm = run_ollama
+    elif provider == "litellm":
+        call_llm = run_litellm
 
     output = call_llm(system_message, user_message)
     return format_output(output)
