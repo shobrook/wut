@@ -49,6 +49,12 @@ If you're using OpenAI, you can customize your model and API URL by adding the f
 > export OPENAI_BASE_URL="..." # Default to None
 ```
 
+If you're using Claude, you can customize your model the same way:
+
+```bash
+> export ANTHROPIC_MODEL="..." # Default to "claude-sonnet-5-5"
+```
+
 ## Usage
 
 `wut` must be used inside a `tmux` or `screen` session to capture the last command's output. To use it, just type `wut` after running a command:

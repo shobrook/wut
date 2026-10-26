@@ -232,7 +232,7 @@ def format_output(output: str) -> str:
 def run_anthropic(system_message: str, user_message: str) -> str:
     anthropic = Anthropic()
     response = anthropic.messages.create(
-        model="claude-3-5-sonnet-20241022",
+        model=os.getenv("ANTHROPIC_MODEL", None) or "claude-sonnet-5-5",
         max_tokens=1024,
         system=system_message,
         messages=[{"role": "user", "content": user_message}],
